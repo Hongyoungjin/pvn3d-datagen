@@ -10,9 +10,8 @@ from isaacgym import gymapi, gymutil
 import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as R
-
 import matplotlib.pyplot as plt
-
+from os import walk
 class DataGenEnv(object):
     def __init__(self):
         # Initialize gym
@@ -63,10 +62,14 @@ class DataGenEnv(object):
         self.target_object_name = sim_cfg["target_object"]
         self.target_dataset_name = sim_cfg["target_dataset"]
         self.object_rand_pose_range = sim_cfg["object_rand_pose_range"]
+        self.camera_rand_position_range = sim_cfg["camera_rand_position_range"]
+        self.camera_rand_rotation_range = sim_cfg["camera_rand_rotation_range"]
         
         
         self.target_object_name = sim_cfg["target_object"]
         self.target_dataset_name = sim_cfg["target_dataset"]
+        self.base_object_name = sim_cfg["base_object"]
+        self.base_dataset_name = sim_cfg["base_dataset"]
         
         
         # simulation method
@@ -81,6 +84,11 @@ class DataGenEnv(object):
         # configure save directory
         root_dir = os.path.dirname(os.path.abspath(__file__)) + '/src'
         self.save_dir = os.path.join(root_dir,self.target_object_name)
+        self.file_list = []
+        
+        for (dirpath, dirnames, filenames) in walk(self.save_dir):
+            self.file_list.extend(filenames)
+            break
         
         # save config files
         os.makedirs(self.save_dir, exist_ok=True)
@@ -93,6 +101,7 @@ class DataGenEnv(object):
         self.hand_handles = []
         self.camera_handles = []
         self.object_handles = []
+        self.base_handles = []
         self.default_dof_pos = []
         
         self.enable_viewer_sync = False
@@ -153,10 +162,10 @@ class DataGenEnv(object):
             self.viewer = self.gym.create_viewer(self.sim, gymapi.CameraProperties())
             
             # set viewer camera pose
-            viewer_pose = gymapi.Vec3(0.5, 0.5, 2)
-            viewer_target = gymapi.Vec3(0.5, 0.5, 0)
+            self.cam_pose = gymapi.Vec3(0.5, 0.5, 2)
+            cam_target = gymapi.Vec3(0.5, 0.5, 0)
             
-            self.gym.viewer_camera_look_at(self.viewer,None,viewer_pose, viewer_target)
+            self.gym.viewer_camera_look_at(self.viewer,None,self.cam_pose, cam_target)
             
             # key callback
             self.gym.subscribe_viewer_keyboard_event(self.viewer,gymapi.KEY_ESCAPE,"QUIT")
@@ -183,6 +192,11 @@ class DataGenEnv(object):
             self.target_object_name,
             self.target_object_name
         )
+        base_asset_file = "{}/{}/{}.urdf".format(
+            self.base_dataset_name,
+            self.base_object_name,
+            self.base_object_name
+        )
         asset_options = gymapi.AssetOptions()
         asset_options.armature = 0.001
         asset_options.fix_base_link = False
@@ -195,6 +209,7 @@ class DataGenEnv(object):
         asset_options.vhacd_params.max_convex_hulls = 50
         asset_options.vhacd_params.max_num_vertices_per_ch = 1000
         object_asset = self.gym.load_asset(self.sim, asset_root, object_asset_file, asset_options)
+        base_asset = self.gym.load_asset(self.sim, asset_root, base_asset_file, asset_options)
         
         # load object stable poses
         object_stable_prob = np.load("assets/{}/{}/stable_prob.npy".format( self.target_dataset_name, self.target_object_name))
@@ -232,11 +247,19 @@ class DataGenEnv(object):
         for env_idx in range(self.num_envs):
             # create env
             env = self.gym.create_env(self.sim, env_lower, env_upper, num_per_row)
+            # Add base
+            base_pose = gymapi.Transform()
+            base_pose.p = gymapi.Vec3(0, 0, 0)
+            base_pose.r = gymapi.Quat(0,0,0,1)
+            
+            base_handle = self.gym.create_actor(env,base_asset,base_pose,"base", env_idx,1)
+            
             # Add object
             object_pose = self.object_stable_poses[np.random.randint(len(self.object_stable_poses))]
-            object_handle = self.gym.create_actor(env,object_asset,object_pose,"object", env_idx,0)
+            object_handle = self.gym.create_actor(env,object_asset,object_pose,"object", env_idx,1)
             
             # set segment id
+            self.gym.set_rigid_body_segmentation_id(env,base_handle,0,0)
             self.gym.set_rigid_body_segmentation_id(env,object_handle,0,1)
             
             # add camera sensor
@@ -248,33 +271,38 @@ class DataGenEnv(object):
             camera_handle  = self.gym.create_camera_sensor(env,camera_props)
             
             # gym camera pose def: x = optical axis, y = left, z = down | convention: OpenGL
-            cam_pose = gymapi.Transform()
-            cam_pose.p = gymapi.Vec3(0,0.16,0.4)
-            cam_pose.r = gymapi.Quat.from_euler_zyx(0,np.deg2rad(90 + 13.5),np.pi/2)
-            self.gym.set_camera_transform(camera_handle,env,cam_pose)
+            self.cam_pose = gymapi.Transform()
+            self.cam_pose.p = gymapi.Vec3(0,0.1,0.3)
+            self.cam_pose.r = gymapi.Quat.from_euler_zyx(0,np.deg2rad(90 + 13.5),np.pi/2)
+            self.gym.set_camera_transform(camera_handle,env,self.cam_pose)
             
             # get camera extrinsic scene
             if env_idx == 0:
                 # convert z = x, x = -y, y = -z
-                rot = R.from_quat([cam_pose.r.x, cam_pose.r.y, cam_pose.r.z, cam_pose.r.w]).as_matrix()
+                rot = R.from_quat([self.cam_pose.r.x, self.cam_pose.r.y, self.cam_pose.r.z, self.cam_pose.r.w]).as_matrix()
                 rot_convert = np.array([[0,0,1], [-1,0,0], [0,-1,0]])
                 rot = np.dot(rot,rot_convert)
                 self.camera_extr = np.eye(4)
                 self.camera_extr[:3,:3] = rot
-                self.camera_extr[:3,3] = np.array([cam_pose.p.x, cam_pose.p.y, cam_pose.p.z])
+                self.camera_extr[:3,3] = np.array([self.cam_pose.p.x, self.cam_pose.p.y, self.cam_pose.p.z])
                 
             # append handles
             self.envs.append(env)
             self.cur_object_stable_poses.append(object_pose)
             self.object_handles.append(object_handle)
             self.camera_handles.append(camera_handle)
+            self.base_handles.append(base_handle)
             
             
       
     def reset_env(self):
         # reset objects to random stable poses
         reset_object_poses = []
+        reset_camera_poses = []
         for env_idx in range(self.num_envs):
+            ##########################################
+            # Reset object pose to random stable poses
+            ##########################################
             rigid_body_handle = self.gym.get_actor_rigid_body_handle(self.envs[env_idx],self.object_handles[env_idx], 0)
             # get stable pose
             t_stable = self.cur_object_stable_poses[env_idx]
@@ -285,7 +313,7 @@ class DataGenEnv(object):
             p_random = gymapi.Vec3(
                 np.random.uniform(-self.object_rand_pose_range, self.object_rand_pose_range),
                 np.random.uniform(-self.object_rand_pose_range, self.object_rand_pose_range),
-                0.0021,)
+                0.021,)
             
             # Give constraints of random rotation for symmetric stable poses
             q_random = R.from_euler('z', np.random.uniform(0, 2*np.pi), degrees=False).as_quat()
@@ -294,22 +322,63 @@ class DataGenEnv(object):
             # get random stable pose
             p = q_random.rotate(p_stable) + p_random
             q = (q_random*q_stable).normalize()
-            # t = gymapi.Transform(p_stable, q_stable)
             t = gymapi.Transform(p, q)
+            
             self.gym.set_rigid_transform(self.envs[env_idx], rigid_body_handle, t)
             
             # append pose
             reset_object_poses.append(t)
 
-            # disable gravity
-            obj_props = self.gym.get_actor_rigid_body_properties(self.envs[env_idx], self.object_handles[env_idx])
-            obj_props[0].flags = gymapi.RIGID_BODY_DISABLE_GRAVITY
-            self.gym.set_actor_rigid_body_properties(self.envs[env_idx], self.object_handles[env_idx], obj_props, False)
+            ####################################
+            # Reset camera pose to random  poses
+            ####################################
+            # get stable pose
+            p_stable = self.cam_pose.p
+            q_stable = self.cam_pose.r
 
+            # get random pose
+            p_random = gymapi.Vec3(
+                np.random.uniform(-self.camera_rand_position_range, self.camera_rand_position_range),
+                np.random.uniform(-self.camera_rand_position_range, self.camera_rand_position_range),
+                np.random.uniform(-self.camera_rand_position_range, self.camera_rand_position_range),)
+            
+            # Give constraints of random rotation for symmetric stable poses
+            q_random = R.from_euler('z', np.random.uniform(-self.camera_rand_rotation_range, self.camera_rand_rotation_range)
+                                    , degrees=True).as_quat()
+            q_random = gymapi.Quat(q_random[0], q_random[1], q_random[2], q_random[3])
+
+            # get random stable pose
+            p = q_random.rotate(p_stable) + p_random
+            q = (q_random*q_stable).normalize()
+            cam_pose = gymapi.Transform(p, q)
+            self.gym.set_camera_transform(self.camera_handles[env_idx],self.envs[env_idx],cam_pose)
+            
+            rot = R.from_quat([cam_pose.r.x, cam_pose.r.y, cam_pose.r.z, cam_pose.r.w]).as_matrix()
+            rot_convert = np.array([[0,0,1], [-1,0,0], [0,-1,0]])
+            rot = np.dot(rot,rot_convert)
+            camera_extr = np.eye(4)
+            camera_extr[:3,:3] = rot
+            camera_extr[:3,3] = np.array([cam_pose.p.x, cam_pose.p.y, cam_pose.p.z])
+            
+            reset_camera_poses.append(camera_extr)
+            
+            ######################################
+            # Reset object color to random  colors
+            ######################################
+            color_object = gymapi.Vec3( np.random.uniform(0,1), np.random.uniform(0,1), np.random.uniform(0,1))
+            color_base = gymapi.Vec3( np.random.uniform(0,1), np.random.uniform(0,1), np.random.uniform(0,1))
+            self.gym.set_rigid_body_color(self.envs[env_idx], self.object_handles[env_idx], 0, gymapi.MESH_VISUAL_AND_COLLISION,color_object)
+            self.gym.set_rigid_body_color(self.envs[env_idx], self.base_handles[env_idx], 0, gymapi.MESH_VISUAL_AND_COLLISION,color_base)
+            # # disable gravity
+            # obj_props = self.gym.get_actor_rigid_body_properties(self.envs[env_idx], self.camera_handles[env_idx])
+            # obj_props[0].flags = gymapi.RIGID_BODY_DISABLE_GRAVITY
+            # self.gym.set_actor_rigid_body_properties(self.envs[env_idx], self.camera_handles[env_idx], obj_props, False)
+            
         # delete all existing lines
         if self.viewer:
             self.gym.clear_lines(self.viewer)
-        return reset_object_poses
+
+        return reset_object_poses, reset_camera_poses
     
     def plot(self,imgs_or_masks):
         fig = plt.figure(figsize=(8,8))
@@ -321,22 +390,21 @@ class DataGenEnv(object):
         plt.show()
         
     def depth_to_pcd(self, depth_img):
-
-        height, width = depth_img.shape
-        row_indices = np.arange(height)
-        col_indices = np.arange(width)
-        pixel_grid = np.meshgrid(col_indices, row_indices)
-        pixels = np.c_[pixel_grid[0].flatten(), pixel_grid[1].flatten()].T
-        pixels_homog = np.r_[pixels, np.ones([1, pixels.shape[1]])]
-        depth_arr = np.tile(depth_img.flatten(), [3, 1])
-        point_cloud = depth_arr * np.linalg.inv(self.camera_matrix).dot(pixels_homog)
+            height, width = depth_img.shape
+            row_indices = np.arange(height)
+            col_indices = np.arange(width)
+            pixel_grid = np.meshgrid(col_indices, row_indices)
+            pixels = np.c_[pixel_grid[0].flatten(), pixel_grid[1].flatten()].T
+            pixels_homog = np.r_[pixels, np.ones([1, pixels.shape[1]])]
+            depth_arr = np.tile(depth_img.flatten(), [3, 1])
+            point_cloud = depth_arr * np.linalg.inv(self.camera_matrix).dot(pixels_homog)
+            
+            point_cloud = point_cloud
+            return point_cloud.transpose()
         
-        point_cloud = point_cloud
-        return point_cloud.transpose()
-    
     def step(self, n_step = 0):
         # reset env
-        object_poses = self.reset_env()
+        object_poses, cam_poses = self.reset_env()
         object_poses = self.pose_type_conversion(object_poses)
         # step the physics
         self.gym.simulate(self.sim)
@@ -367,7 +435,7 @@ class DataGenEnv(object):
                 with open(os.path.join(self.save_dir,'data','mask' + name), 'wb') as f:
                     np.save(f, segmasks[env_idx])
                 with open(os.path.join(self.save_dir,'data','pose' + name), 'wb') as f:
-                    np.save(f, self.pose_camera_frame(object_poses[env_idx]))
+                    np.save(f, self.pose_camera_frame(object_poses[env_idx], cam_poses[env_idx]))
                     
                 
         return None
@@ -381,14 +449,14 @@ class DataGenEnv(object):
             converted_poses.append(converted_pose)
         return converted_poses
     
-    def pose_camera_frame(self, pose):
+    def pose_camera_frame(self, pose, cam_pose):
         
         p = pose[:3]
         q = pose[3:]
         
         r = R.from_quat(q).as_matrix()
         object2world_frame = np.vstack([np.c_[r, p.reshape(3,1)], np.array([[0,0,0,1]])])
-        obj_pose_hom = self.world2camera_frame @ object2world_frame
+        obj_pose_hom = np.linalg.inv(cam_pose) @ object2world_frame
         
         r = obj_pose_hom[:3,:3]
         t = obj_pose_hom[:3, 3].reshape(3)
@@ -449,15 +517,6 @@ class DataGenEnv(object):
             
             segmasks.append(segmask)
             
-            # if self.save_results:
-                
-            #     os.makedirs(os.path.join(self.save_dir,'data'), exist_ok=True)
-            #     name_img = ("_%0" + str(self.FILE_ZERO_PADDING_NUM) + 'd.png')%(n_step * self.num_envs + i)
-            #     # with open(os.path.join(self.save_dir,'data','color_image' + name_img), 'wb') as f:
-            #     #         np.save(f, color_images)
-                        
-            #     self.gym.write_camera_image_to_file(self.sim, self.envs[i], self.camera_handles[i], gymapi.IMAGE_COLOR, os.path.join(self.save_dir,'data','color_image' + name_img))
-            
         depth_images = np.array(depth_images) * -1
         color_images = np.array(color_images)
         segmasks = np.array(segmasks)
@@ -469,7 +528,7 @@ class DataGenEnv(object):
     
 if __name__ == '__main__':
     env = DataGenEnv()
-    config_file = 'cfg/config.yaml'
+    config_file = "/home/hong/ws/pointnet2_pose_isaac/cfg/config.yaml"
     with open(config_file,"r") as f:
         cfg = yaml.safe_load(f)
         
