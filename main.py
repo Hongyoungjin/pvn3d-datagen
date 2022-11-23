@@ -528,7 +528,7 @@ class DataGenEnv(object):
     
 if __name__ == '__main__':
     env = DataGenEnv()
-    config_file = "/home/hong/ws/pointnet2_pose_isaac/cfg/config.yaml"
+    config_file = os.path.join(os.path.dirname(__file__), 'cfg/config.yaml')
     with open(config_file,"r") as f:
         cfg = yaml.safe_load(f)
         
