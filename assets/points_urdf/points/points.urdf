@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="points">
+  <link name="points">
+    <inertial>
+      <mass value="0.05" />
+      <inertia ixx="-7.236101331076141e-11" ixy="2.301151226181991e-12" ixz="5.340073658113964e-12" iyy="-1.25088282685383e-10" iyz="1.8311780193752482e-11" izz="6.733717176910195e-11" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/points_urdf/points/points.stl" scale="1 1 1" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/points_urdf/points/points.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+  </link>
+</robot>

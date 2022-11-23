@@ -1,0 +1,48 @@
+simulation:
+  physics_engine: PHYSX
+  num_threads : 16
+  use_gpu_pipeline : False
+  use_gpu: False
+  compute_device_id: 0
+  graphics_device_id: 0
+  num_envs: 10
+  FILE_ZERO_PADDING_NUM: 5
+  num_iters: 10
+  dt: 0.01
+  render_freq: 1000
+
+  target_dataset: points_urdf
+  target_object: points
+
+  base_dataset: base_urdf
+  base_object: base_xy_10x10
+
+  object_rand_pose_range: 0.05
+  camera_rand_position_range: 0.05
+  camera_rand_rotation_range: 10 #degrees
+  gravity: [0,0,-9.81]
+
+  min_stable_pose_prob: 0.01
+  max_num_stable_pose: 50
+
+
+
+  camera:
+    AzureKinect:
+    
+      depth:
+        fx: 305.9728241
+        fy: 305.94388962
+        cx: 320.10463715
+        cy: 244.73226547
+
+      color:
+        fx: 315.139
+        fy: 236.372
+        cx: 326.8280  
+        cy: 245.1210
+
+
+
+
+

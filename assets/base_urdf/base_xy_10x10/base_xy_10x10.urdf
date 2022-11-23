@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="base_xy_10x10">
+  <link name="base_xy_10x10">
+    <inertial>
+      <mass value="0.05" />
+      <inertia ixx="0.4166670833333334" ixy="-0.0" ixz="-0.0" iyy="0.4166670833333334" iyz="-0.0" izz="0.8333333333333335" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/base_urdf/base_xy_10x10/base_xy_10x10.obj" scale="1 1 1" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="assets/base_urdf/base_xy_10x10/base_xy_10x10.obj" scale="1 1 1" />
+      </geometry>
+    </collision>
+  </link>
+</robot>
